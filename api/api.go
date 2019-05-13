@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -18,13 +17,13 @@ func CreateRoutes(router *gin.RouterGroup) {
 }
 
 func getBestFlight(c *gin.Context) {
-	origin := strings.Replace(c.Query("origin"), " ", "", -1)
+	origin := c.Query("origin")
 	if origin == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "'origin' param not specified"})
 		return
 	}
 
-	destination := strings.Replace(c.Query("destination"), " ", "", -1)
+	destination := c.Query("destination")
 	if destination == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "'destination' param not specified"})
 		return
@@ -61,13 +60,12 @@ func getBestFlight(c *gin.Context) {
 		return
 	}
 
-	routes, err := model.GetAllRoutes()
+	routeMap, err := model.GetRouteMap()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error while getting all routes: " + err.Error()})
 		return
 	}
-
-	flight := calculateBestFlight(originAirports, destAirports, routes)
+	flight := calculateBestFlight(originAirports, destAirports, routeMap)
 	if flight == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "There is no route for this 'origin' and 'destination'"})
 		return
@@ -75,19 +73,16 @@ func getBestFlight(c *gin.Context) {
 	c.JSON(http.StatusOK, flight)
 }
 
-func calculateBestFlight(originAirports, destAirports []string, routes []model.Route) []model.Connection {
-	fmt.Println("calculateBestFlight")
+func calculateBestFlight(originAirports, destAirports []string, routeMap model.RouteMap) []model.Connection {
 	var bestFlight []model.Connection
+
 	for _, origin := range originAirports {
 		for _, dest := range destAirports {
-			var previousOrigins []string
-			flight := findBestFlightForRoute(origin, dest, previousOrigins, routes, 0)
+			flight := findBestFlightForRoute(origin, dest, make(map[string]bool), routeMap)
 
 			if flight == nil || len(flight) <= 0 {
 				continue
 			}
-
-			fmt.Printf("calculateBestFlight loop result: %+v\n", flight)
 
 			if len(bestFlight) == 0 || len(bestFlight) > len(flight) {
 				bestFlight = flight
@@ -101,104 +96,33 @@ func calculateBestFlight(originAirports, destAirports []string, routes []model.R
 	return bestFlight
 }
 
-func findBestFlightForRoute(origin string, finalDestination string, previousOrigins []string, routes []model.Route, bestFlightLength int) []model.Connection {
-	fmt.Printf("findBestFlightForRoute %s %s %v \n", origin, finalDestination, previousOrigins)
-	if bestFlightLength > 0 && bestFlightLength <= len(previousOrigins) {
+func findBestFlightForRoute(origin string, finalDestination string, previousOrigins map[string]bool, routeMap model.RouteMap) []model.Connection {
+	routeMapDest, exists := routeMap[origin]
+	if !exists {
 		return nil
 	}
 
-	for _, route := range routes {
-		if route.Origin == origin {
-			if !destinationIsValid(previousOrigins, route.Destination) {
-				continue
-			}
-
-			if route.Destination == finalDestination {
-				connection, err := generateConnection(route)
-				if err != nil {
-					return nil
-				}
-				return []model.Connection{*connection}
-			} else {
-				flight := findBestFlightForRoute(route.Destination, finalDestination, append(previousOrigins, route.Origin), routes, bestFlightLength)
-				if flight == nil {
-					continue
-				}
-				connection, err := generateConnection(route)
-				if err != nil {
-					return nil
-				}
-				flight = append([]model.Connection{*connection}, flight...)
-				return flight
-			}
-		}
+	connection, exists := routeMapDest[finalDestination]
+	if exists {
+		return []model.Connection{connection}
 	}
 
-	return nil
-}
+	var bestFlightForRoute []model.Connection
 
-func destinationIsValid(origins []string, destination string) bool {
-	for _, origin := range origins {
-		if origin == destination {
-			return false
-		}
-	}
-	return true
-}
-
-func generateConnection(route model.Route) (*model.Connection, error) {
-	// airline, err := model.GetAirlineByID(route.AirlineID)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// originAirport, err := model.GetAirportByIATA(route.Origin)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// destAirport, err := model.GetAirportByIATA(route.Destination)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// return &model.Connection{
-	// 	Airline:     airline,
-	// 	Origin:      originAirport,
-	// 	Destination: destAirport,
-	// }, nil
-	return &model.Connection{
-		Airline:     &model.Airline{ThreeDigitCode: route.AirlineID},
-		Origin:      &model.Airport{IATA3: route.Origin},
-		Destination: &model.Airport{IATA3: route.Destination},
-	}, nil
-}
-
-func generateConnections(routes []model.Route) ([]model.Connection, error) {
-	var connections []model.Connection
-
-	for _, route := range routes {
-		airline, err := model.GetAirlineByID(route.AirlineID)
-		if err != nil {
-			return nil, err
+	for destination, connection := range routeMapDest {
+		_, previousExists := previousOrigins[destination]
+		if previousExists {
+			continue
 		}
 
-		originAirport, err := model.GetAirportByIATA(route.Origin)
-		if err != nil {
-			return nil, err
+		previousOrigins[origin] = true
+		flight := findBestFlightForRoute(destination, finalDestination, previousOrigins, routeMap)
+		if flight == nil || (bestFlightForRoute != nil && len(flight)+1 >= len(bestFlightForRoute)) {
+			continue
 		}
-
-		destAirport, err := model.GetAirportByIATA(route.Destination)
-		if err != nil {
-			return nil, err
-		}
-
-		connections = append(connections, model.Connection{
-			Airline:     airline,
-			Origin:      originAirport,
-			Destination: destAirport,
-		})
+		flight = append([]model.Connection{connection}, flight...)
+		bestFlightForRoute = flight
 	}
 
-	return connections, nil
+	return bestFlightForRoute
 }

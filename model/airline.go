@@ -3,6 +3,7 @@ package model
 import (
 	"bufio"
 	"encoding/csv"
+	"errors"
 	"io"
 	"os"
 )
@@ -18,14 +19,18 @@ const (
 	airlineFileName string = "airlines"
 )
 
-func GetAirlineByID(code string) (*Airline, error) {
-	csvFile, err := os.Open("./data/" + routeFileName + ".csv")
+var airlines map[string]Airline
+var airlineDataIsLoaded = false
+
+func loadAirlines() error {
+	csvFile, err := os.Open("./data/" + airlineFileName + ".csv")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer csvFile.Close()
 	reader := csv.NewReader(bufio.NewReader(csvFile))
 
+	airlines = make(map[string]Airline)
 	isHeader := true
 	for {
 		line, err := reader.Read()
@@ -36,30 +41,31 @@ func GetAirlineByID(code string) (*Airline, error) {
 		if err == io.EOF {
 			break
 		} else if err != nil {
-			return nil, err
+			return err
 		}
 
-		if line[2] != code {
-			continue
-		}
-
-		return &Airline{
+		airlines[line[1]] = Airline{
 			Name:           line[0],
 			TwoDigitCode:   line[1],
 			ThreeDigitCode: line[2],
 			Country:        line[3],
-		}, nil
+		}
 	}
 
-	return nil, nil
+	airlineDataIsLoaded = true
+	return nil
 }
 
-/*
-Name					2 Digit Code	3 Digit Code	Country
-Air China				CA				CCA				China
-China Southern Airlines	CZ				CSN				China
-Southwest Airlines		WN				SWA				United States
-Turkish Airlines		TK				THY				Turkey
-United Airlines			UA				UAL				United States
-WestJet					WS				WJA				Canada
-*/
+func GetAirlineByID(id string) (*Airline, error) {
+	if !airlineDataIsLoaded {
+		if err := loadAirlines(); err != nil {
+			return nil, err
+		}
+	}
+
+	airline, ok := airlines[id]
+	if !ok {
+		return nil, errors.New("Airline not found")
+	}
+	return &airline, nil
+}
