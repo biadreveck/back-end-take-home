@@ -17,7 +17,7 @@ Endpoint: /flight
 #### Example
 
 ##### Request:
-> GET http://localhost:8080/flight?origin=Toronto,Canada&destination=Maraba,Brazil
+> GET http://localhost:8080/flight?origin=Toronto,Canada&destination=Rio de Janeiro,Brazil
 
 ##### Response:
 ```json
